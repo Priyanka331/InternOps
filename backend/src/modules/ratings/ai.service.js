@@ -1,13 +1,48 @@
+const path = require('path');
+const fs = require('fs');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const config = require('../../config');
 const metrics = require('../../utils/metrics');
-const {
-  clean_and_parse_json,
-} = require('../../../ai-service/app/utils/prompt_cleaner');
-const {
-  RATINGS_SYSTEM_PROMPT,
-  RATINGS_FEW_SHOT_EXAMPLE,
-} = require('../../../ai-service/app/prompts/ratings');
+
+// Resolve paths safely (go up 4 levels to reach repo root, then into ai-service)
+const promptCleanerPath = path.resolve(
+  __dirname,
+  '../../../../ai-service/app/utils/prompt_cleaner'
+);
+const ratingsPromptsPath = path.resolve(
+  __dirname,
+  '../../../../ai-service/app/prompts/ratings'
+);
+
+let clean_and_parse_json;
+let RATINGS_SYSTEM_PROMPT;
+let RATINGS_FEW_SHOT_EXAMPLE;
+
+// Load parser with fallback
+if (
+  fs.existsSync(promptCleanerPath + '.js') ||
+  fs.existsSync(promptCleanerPath)
+) {
+  ({ clean_and_parse_json } = require(promptCleanerPath));
+} else {
+  clean_and_parse_json = (raw) => {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return {};
+    }
+  };
+}
+
+// Load prompts with fallback
+try {
+  const prompts = require(ratingsPromptsPath);
+  RATINGS_SYSTEM_PROMPT = prompts.RATINGS_SYSTEM_PROMPT || '';
+  RATINGS_FEW_SHOT_EXAMPLE = prompts.RATINGS_FEW_SHOT_EXAMPLE || {};
+} catch (e) {
+  RATINGS_SYSTEM_PROMPT = '';
+  RATINGS_FEW_SHOT_EXAMPLE = {};
+}
 
 const genAI = new GoogleGenerativeAI(config.ai.geminiKey);
 
