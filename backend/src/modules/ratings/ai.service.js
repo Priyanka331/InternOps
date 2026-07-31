@@ -1,53 +1,16 @@
-const path = require('path');
-const fs = require('fs');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const config = require('../../config');
 const metrics = require('../../utils/metrics');
-
-// Resolve paths safely (go up 4 levels to reach repo root, then into ai-service)
-const promptCleanerPath = path.resolve(
-  __dirname,
-  '../../../../ai-service/app/utils/prompt_cleaner'
-);
-const ratingsPromptsPath = path.resolve(
-  __dirname,
-  '../../../../ai-service/app/prompts/ratings'
-);
-
-let clean_and_parse_json;
-let RATINGS_SYSTEM_PROMPT;
-let RATINGS_FEW_SHOT_EXAMPLE;
-
-// Load parser with fallback
-if (
-  fs.existsSync(promptCleanerPath + '.js') ||
-  fs.existsSync(promptCleanerPath)
-) {
-  ({ clean_and_parse_json } = require(promptCleanerPath));
-} else {
-  clean_and_parse_json = (raw) => {
-    try {
-      return JSON.parse(raw);
-    } catch {
-      return {};
-    }
-  };
-}
-
-// Load prompts with fallback
-try {
-  const prompts = require(ratingsPromptsPath);
-  RATINGS_SYSTEM_PROMPT = prompts.RATINGS_SYSTEM_PROMPT || '';
-  RATINGS_FEW_SHOT_EXAMPLE = prompts.RATINGS_FEW_SHOT_EXAMPLE || {};
-} catch (e) {
-  RATINGS_SYSTEM_PROMPT = '';
-  RATINGS_FEW_SHOT_EXAMPLE = {};
-}
+const { clean_and_parse_json } = require('../../utils/promptCleaner');
+const {
+  RATINGS_SYSTEM_PROMPT,
+  RATINGS_FEW_SHOT_EXAMPLE,
+} = require('../../../ai-service/app/prompts/ratings');
 
 const genAI = new GoogleGenerativeAI(config.ai.geminiKey);
 
-const MAX_REASON_WORDS = 15;
-const MIN_REASON_WORDS = 10;
+const MAX_FEEDBACK_WORDS = 15;
+const MIN_FEEDBACK_WORDS = 10;
 
 function safeSandbox(value, maxLen = 200) {
   if (value === null || value === undefined) return null;
@@ -127,28 +90,28 @@ async function generateRatingSuggestion(data) {
     return {
       source: 'ai',
       suggestedScore: null,
-      reasoning: 'Invalid score from AI response',
+      feedback: 'Invalid score from AI response',
     };
   }
 
-  let reason = String(parsed.reason || '').trim();
-  if (!reason) {
+  let feedback = String(parsed.feedback || '').trim();
+  if (!feedback) {
     return {
       source: 'ai',
       suggestedScore: score,
-      reasoning: 'Missing reason in AI response',
+      feedback: 'Missing feedback in AI response',
     };
   }
 
-  const wordCount = reason.split(/\s+/).filter(Boolean).length;
-  if (wordCount < MIN_REASON_WORDS || wordCount > MAX_REASON_WORDS) {
-    reason = reason.split(/\s+/).slice(0, MAX_REASON_WORDS).join(' ');
+  const wordCount = feedback.split(/\s+/).filter(Boolean).length;
+  if (wordCount < MIN_FEEDBACK_WORDS || wordCount > MAX_FEEDBACK_WORDS) {
+    feedback = feedback.split(/\s+/).slice(0, MAX_FEEDBACK_WORDS).join(' ');
   }
 
   return {
     source: 'ai',
     suggestedScore: score,
-    reasoning: reason,
+    feedback,
   };
 }
 

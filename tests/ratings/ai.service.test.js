@@ -1,26 +1,51 @@
+// Mock Gemini so tests don't hit the real API
+jest.mock('@google/generative-ai', () => ({
+  GoogleGenerativeAI: jest.fn().mockImplementation(() => ({
+    getGenerativeModel: () => ({
+      generateContent: jest.fn().mockResolvedValue({
+        response: {
+          text: () =>
+            '{"score":8,"feedback":"Consistent performance and good attendance"}',
+          usageMetadata: { totalTokenCount: 42 },
+        },
+      }),
+    }),
+  })),
+}));
+
 const {
   generateRatingSuggestion,
 } = require('../../backend/src/modules/ratings/ai.service');
 
 describe('generateRatingSuggestion', () => {
-  it('returns valid score and reason when AI response is correct', async () => {
+  it('returns valid score and feedback when AI response is correct', async () => {
     const mockData = {
       user: { id: '123', role: 'intern' },
       metrics: { attendancePercentage: 90, verificationRate: 80 },
     };
+
     const result = await generateRatingSuggestion(mockData);
+
     expect(result.source).toBe('ai');
-    expect(result.suggestedScore).toBeGreaterThanOrEqual(1);
-    expect(result.suggestedScore).toBeLessThanOrEqual(10);
-    expect(result.reasoning.length).toBeGreaterThan(0);
+    expect(result.suggestedScore).toBe(8);
+    expect(result.feedback).toMatch(/Consistent performance/);
   });
 
   it('handles invalid JSON gracefully', async () => {
+    // Override mock to return bad JSON
+    const { GoogleGenerativeAI } = require('@google/generative-ai');
+    GoogleGenerativeAI.mockImplementation(() => ({
+      getGenerativeModel: () => ({
+        generateContent: jest.fn().mockResolvedValue({
+          response: { text: () => '{bad json}' },
+        }),
+      }),
+    }));
+
     const badData = { user: { id: 'bad' }, metrics: {} };
     const result = await generateRatingSuggestion(badData);
-    expect(
-      result.suggestedScore === null ||
-        typeof result.suggestedScore === 'number'
-    ).toBe(true);
+
+    expect(result.suggestedScore).toBeNull();
+    expect(result.feedback).toMatch(/Invalid|Missing|Parsing failed/);
   });
 });
