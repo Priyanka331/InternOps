@@ -25,4 +25,9 @@ module.exports = {
     },
   },
   testTimeout: 30000,
+
+  // 👇 Added mapping so tests don’t fail when ai-service is missing
+  moduleNameMapper: {
+    '^../../../ai-service/(.*)$': '<rootDir>/tests/__mocks__/ai-service/$1',
+  },
 };

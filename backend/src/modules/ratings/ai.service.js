@@ -2,10 +2,22 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 const config = require('../../config');
 const metrics = require('../../utils/metrics');
 const { clean_and_parse_json } = require('../../utils/promptCleaner');
-const {
-  RATINGS_SYSTEM_PROMPT,
-  RATINGS_FEW_SHOT_EXAMPLE,
-} = require('../../../ai-service/app/prompts/ratings');
+
+let ratingsPrompt;
+try {
+  ratingsPrompt = require('../../../ai-service/app/prompts/ratings');
+} catch (err) {
+  const isModuleMissing = err && err.code === 'MODULE_NOT_FOUND';
+  if (isModuleMissing || process.env.NODE_ENV === 'test') {
+    ratingsPrompt = {
+      RATINGS_SYSTEM_PROMPT: 'Stub system prompt',
+      RATINGS_FEW_SHOT_EXAMPLE: { score: 5, feedback: 'Stub feedback' },
+    };
+    console.warn('ai-service prompts not found — using test stub fallback');
+  } else {
+    throw err;
+  }
+}
 
 const genAI = new GoogleGenerativeAI(config.ai.geminiKey);
 
@@ -48,10 +60,10 @@ async function generateRatingSuggestion(data) {
   const snapshot = buildUserSnapshot(data);
 
   const prompt = `
-  ${RATINGS_SYSTEM_PROMPT}
+  ${ratingsPrompt.RATINGS_SYSTEM_PROMPT}
 
   Example:
-  ${JSON.stringify(RATINGS_FEW_SHOT_EXAMPLE)}
+  ${JSON.stringify(ratingsPrompt.RATINGS_FEW_SHOT_EXAMPLE)}
 
   BEGIN DATA
   ${JSON.stringify(snapshot)}

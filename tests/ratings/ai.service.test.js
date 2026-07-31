@@ -32,7 +32,6 @@ describe('generateRatingSuggestion', () => {
   });
 
   it('handles invalid JSON gracefully', async () => {
-    // Override mock to return bad JSON
     const { GoogleGenerativeAI } = require('@google/generative-ai');
     GoogleGenerativeAI.mockImplementation(() => ({
       getGenerativeModel: () => ({
