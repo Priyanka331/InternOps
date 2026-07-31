@@ -4,6 +4,7 @@ module.exports = {
   verbose: true,
   forceExit: true,
   detectOpenHandles: true,
+  maxWorkers: 1,
   globalSetup: '<rootDir>/tests/globalSetup.js',
   globalTeardown: '<rootDir>/tests/globalTeardown.js',
   setupFilesAfterEnv: ['<rootDir>/tests/setup.js'],
@@ -24,6 +25,7 @@ module.exports = {
       statements: 40,
     },
   },
+  // ✅ Pick a consistent timeout (30s is fine for CI, but you can raise if needed)
   testTimeout: 30000,
 
   // 👇 Added mapping so tests don’t fail when ai-service is missing
