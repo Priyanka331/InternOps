@@ -1,15 +1,30 @@
 module.exports = {
   testEnvironment: 'node',
+
   testMatch: ['**/tests/**/*.test.js'],
+
   verbose: true,
+
   forceExit: true,
+
   detectOpenHandles: true,
+
   maxWorkers: 1,
+
   globalSetup: '<rootDir>/tests/globalSetup.js',
+
   globalTeardown: '<rootDir>/tests/globalTeardown.js',
+
+  // Load environment variables before Jest starts tests
+  setupFiles: ['<rootDir>/tests/envSetup.js'],
+
+  // Existing mocks and Jest setup
   setupFilesAfterEnv: ['<rootDir>/tests/setup.js'],
+
   collectCoverage: false,
+
   coverageDirectory: 'coverage',
+
   collectCoverageFrom: [
     'src/modules/auth/**/*.js',
     'src/modules/meetings/**/*.js',
@@ -17,6 +32,7 @@ module.exports = {
     'src/middleware/**/*.js',
     'src/services/**/*.js',
   ],
+
   coverageThreshold: {
     global: {
       branches: 33,

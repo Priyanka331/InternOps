@@ -39,6 +39,7 @@ from app.providers.registry import get_configured_providers_health, get_provider
 
 router = APIRouter(prefix="/ai", tags=["AI"])
 
+
 MAX_MESSAGES = 32
 MAX_MESSAGE_CHARS = 4000
 MAX_TOTAL_CHARS = 32000
@@ -52,19 +53,56 @@ def _messages_to_prompt(messages: List[dict]) -> str:
     )
 
 
+
+
 async def call_provider(user_id: str, messages: List[dict]) -> ProviderResult:
-    provider = get_provider()
     prompt = _messages_to_prompt(messages)
-    content = await provider.generate_text(prompt)
+
+    temperature = 0.7
+
+    key = cache_key(
+        provider="orchestrator",
+        model="fallback",
+        prompt=prompt,
+        temperature=temperature,
+    )
+
+    async def compute():
+        return await ai_orchestrator.generate_text_with_fallback(prompt)
+
+    (content, provider_name), cached = await get_or_set(
+        key=key,
+        compute=compute,
+    )
+
     return ProviderResult(
         provider=provider.provider_name,
         cached=False,
         content=content,
     )
 
+   
 
-def get_provider_health() -> list:
-    return get_configured_providers_health()
+
+async def get_provider_health() -> list:
+    raw_health = get_configured_providers_health()
+    report = []
+    for p in raw_health:
+        name = p["name"]
+        cb = get_circuit_breaker(name)
+        available = p["available"]
+        last_error = p.get("lastError") or {}
+        
+        if await cb.is_open():
+            available = False
+            last_error = {"message": f"Circuit breaker open. Cooldown until {datetime.fromtimestamp(cb.disabled_until).isoformat() if cb.disabled_until else 'unknown'}"}
+            
+        report.append({
+            "name": name,
+            "available": available,
+            "lastError": last_error if last_error else None
+        })
+    return report
 
 
 # ---------------------------------------------------------------------------
@@ -116,6 +154,15 @@ async def chat(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Message content cannot be empty",
+        )
+
+    try:
+        for msg in final_messages:
+            msg["content"] = sanitize_prompt(msg["content"])
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
         )
 
     usage = await get_today_usage(current_user.id)
@@ -187,7 +234,7 @@ async def health():
             status="healthy" if p["available"] else "unhealthy",
             lastErrorMessage=(p.get("lastError") or {}).get("message"),
         )
-        for p in get_provider_health()
+        for p in await get_provider_health()
     ]
     return HealthResponse(providers=providers)
 
