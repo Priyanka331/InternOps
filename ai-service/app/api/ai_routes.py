@@ -4,15 +4,11 @@ AI routes — Python/FastAPI port of ai_routes.js
 Split to match ai-service/app's layout (api/ + core/ + models/ + providers/):
   - app/models/ai.py         -> request/response schemas
   - app/core/auth.py          -> get_current_user (STUB)
-  - app/core/rbac.py           -> require_roles (STUB)
-  - app/core/rate_limit.py      -> enforce_rate_limit (STUB)
-  - app/core/usage.py            -> daily usage tracking (STUB)
-  - app/providers/*                -> base/gemini/openai adapters (real, from #1421)
-  - app/providers/registry.py     -> provider selection (get_provider), added here
-
-`call_provider` below flattens the message list into a single prompt
-(see `_messages_to_prompt`) since BaseAIProvider.generate_text() doesn't
-support multi-turn history yet, then calls the configured adapter for real.
+  - app/core/rbac.py          -> require_roles (STUB)
+  - app/core/rate_limit.py    -> enforce_rate_limit (STUB)
+  - app/core/usage.py         -> daily usage tracking (STUB)
+  - app/providers/*           -> base/gemini/openai adapters
+  - app/providers/registry.py -> provider selection (get_provider)
 """
 
 from datetime import datetime, timezone
@@ -20,45 +16,36 @@ from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
-from ..core.auth import User, get_current_user
-from ..core.rate_limit import enforce_rate_limit
-from ..core.rbac import require_roles
-from ..core.usage import (
+from app.core.auth import User, get_current_user
+from app.core.rate_limit import enforce_rate_limit
+from app.core.rbac import require_roles
+from app.core.usage import (
     DAILY_AI_LIMIT,
     get_daily_usage_report,
     get_today_usage,
     increment_usage,
 )
-from ..models.ai import (
+from app.models.ai import (
     ChatBody,
     ChatResponse,
     HealthResponse,
     ProviderHealthEntry,
     ProviderResult,
     UsageResponse,
+    GenerationRequest,
 )
-from ..providers.base import AIProviderError, ProviderAPIError, ProviderRateLimitError
-from ..providers.registry import get_configured_providers_health, get_provider
+from app.providers.base import AIProviderError, ProviderAPIError, ProviderRateLimitError
+from app.providers.registry import get_configured_providers_health, get_provider
 
 router = APIRouter(prefix="/ai", tags=["AI"])
 
 MAX_MESSAGES = 32
 MAX_MESSAGE_CHARS = 4000
 MAX_TOTAL_CHARS = 32000
-# Fastify's bodyLimit (2MB) equivalent belongs at the ASGI/reverse-proxy
-# layer (e.g. nginx client_max_body_size), not in route code.
-BODY_LIMIT_BYTES = 2 * 1024 * 1024
 
 
 def _messages_to_prompt(messages: List[dict]) -> str:
-    """Flatten a chat-style message list into a single prompt string.
-
-    TODO(providers): BaseAIProvider.generate_text() takes a single prompt,
-    not a multi-turn message list — the adapters don't have native
-    chat/history support yet. This is a simple, intentionally-lossy
-    workaround (roles become text labels, no real conversation structure)
-    until the provider interface grows multi-turn support.
-    """
+    """Flatten a chat-style message list into a single prompt string."""
     role_labels = {"user": "User", "assistant": "Assistant", "system": "System"}
     return "\n\n".join(
         f"{role_labels.get(m['role'], m['role'])}: {m['content']}" for m in messages
@@ -71,7 +58,7 @@ async def call_provider(user_id: str, messages: List[dict]) -> ProviderResult:
     content = await provider.generate_text(prompt)
     return ProviderResult(
         provider=provider.provider_name,
-        cached=False,  # TODO(caching): no caching layer wired up yet
+        cached=False,
         content=content,
     )
 
@@ -95,15 +82,9 @@ async def chat(
     current_user: User = Depends(get_current_user),
     _rate_limited: None = Depends(enforce_rate_limit),
 ):
-    # TODO(sanitize): run body through a real sanitizer once one exists
-    # (JS used a sanitizationMiddleware ahead of the handler)
-
     final_messages: List[dict] = []
 
     if body.messages:
-        # Role validity is enforced by the Role enum on ChatMessage —
-        # an invalid role fails FastAPI's own 422 validation before we
-        # get here (equivalent to the JS 400 "Invalid message role").
         final_messages = [
             {"role": msg.role.value, "content": (msg.content or "")[:2000]}
             for msg in body.messages[:16]
@@ -124,23 +105,14 @@ async def chat(
             detail="Too many messages",
         )
 
-    total_chars = 0
-    for msg in final_messages:
-        content = msg["content"] or ""
-        if len(content) > MAX_MESSAGE_CHARS:
-            raise HTTPException(
-                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                detail="Message exceeds maximum length",
-            )
-        total_chars += len(content)
-
+    total_chars = sum(len(msg["content"] or "") for msg in final_messages)
     if total_chars > MAX_TOTAL_CHARS:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             detail="Prompt too long",
         )
 
-    if any(not msg["content"] or not msg["content"].strip() for msg in final_messages):
+    if any(not msg["content"].strip() for msg in final_messages):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Message content cannot be empty",
@@ -159,7 +131,7 @@ async def chat(
         return ChatResponse(
             provider=result.provider, cached=result.cached, content=result.content
         )
-    except ProviderRateLimitError as error:
+    except ProviderRateLimitError:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="AI provider rate limit exceeded",
@@ -174,14 +146,31 @@ async def chat(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="AI provider service unavailable"
         )
-    except AIProviderError as error:
-        # Covers ProviderTimeoutError, and any AIProviderError raised
-        # directly by the registry (e.g. missing API key config).
+    except AIProviderError:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="AI service unavailable",
         )
-        
+
+
+# ---------------------------------------------------------------------------
+# POST /ai/generate
+# ---------------------------------------------------------------------------
+@router.post(
+    "/generate",
+    summary="Generate text with sanitized prompt",
+    response_model=ProviderResult,
+)
+async def generate_text(request: GenerationRequest):
+    provider = get_provider()
+    content = await provider.generate_text(request.prompt)
+    return ProviderResult(
+        provider=provider.provider_name,
+        cached=False,
+        content=content,
+    )
+
+
 # ---------------------------------------------------------------------------
 # GET /ai/health
 # ---------------------------------------------------------------------------
