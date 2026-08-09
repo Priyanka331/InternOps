@@ -23,4 +23,4 @@ def test_injection_pattern():
 
 def test_escape_delimiters():
     result = sanitize_user_input("Here is code: ```python print('hi')```")
-    assert "'''" in result
+    assert "***" in result

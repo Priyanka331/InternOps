@@ -35,21 +35,8 @@ async def lifespan(app: FastAPI):
         await close_pool()
 
 
-# Initialize FastAPI app with project settings
-app = FastAPI(title=settings.PROJECT_NAME)
-
-# ---------------------------------------------------------------------------
-# Lifecycle events
-# ---------------------------------------------------------------------------
-@app.on_event("startup")
-async def startup():
-    # Initialize database connection pool
-    await get_pool()
-
-@app.on_event("shutdown")
-async def shutdown():
-    # Close database connection pool
-    await close_pool()
+# Initialize FastAPI app with project settings and lifespan lifecycle
+app = FastAPI(title=settings.PROJECT_NAME, lifespan=lifespan)
 
 # ---------------------------------------------------------------------------
 # Routers

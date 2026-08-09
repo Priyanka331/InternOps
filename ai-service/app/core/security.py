@@ -28,11 +28,11 @@ def sanitize_user_input(text: str, max_length: int = 2000) -> str:
     for pattern in INJECTION_PATTERNS:
         if re.search(pattern, cleaned, re.IGNORECASE):
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="Security Violation: Input contains forbidden system override instructions."
             )
 
-    cleaned = cleaned.replace("```", "'''")
+    cleaned = cleaned.replace("```", "***")
     return cleaned
 
 sanitize_prompt = sanitize_user_input
