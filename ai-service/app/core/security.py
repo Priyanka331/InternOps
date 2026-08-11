@@ -1,5 +1,4 @@
 import re
-from fastapi import HTTPException, status
 
 INJECTION_PATTERNS = [
     r"ignore (all )?previous instructions",
@@ -10,27 +9,19 @@ INJECTION_PATTERNS = [
     r"```system",
 ]
 
+
 def sanitize_user_input(text: str, max_length: int = 2000) -> str:
     if not text or not text.strip():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Prompt text cannot be empty."
-        )
+        raise ValueError("Prompt text cannot be empty.")
 
     cleaned = text.strip()
 
     if len(cleaned) > max_length:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Prompt exceeds maximum allowed length of {max_length} characters."
-        )
+        raise ValueError(f"Prompt exceeds maximum allowed length of {max_length} characters.")
 
     for pattern in INJECTION_PATTERNS:
         if re.search(pattern, cleaned, re.IGNORECASE):
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail="Security Violation: Input contains forbidden system override instructions."
-            )
+            raise ValueError("Security Violation: Input contains forbidden system override instructions.")
 
     cleaned = cleaned.replace("```", "***")
     return cleaned
